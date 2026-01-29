@@ -35,10 +35,12 @@ python run.py prob \
 
 ### 2) no masking condition, video region and A_content masked + only black videos
 
+```bash
 python run.py prob \
   --query_scope assistant_content \
   --video_mode black_video \
   --mask_regions none,video,A_content
+```
 
 ## ✅ Attention scores retrieval (`attention_weights`) — assistant content
 
