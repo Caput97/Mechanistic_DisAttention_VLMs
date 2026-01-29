@@ -1,6 +1,6 @@
 import os
 # Limit visible GPUs (optional, keep if needed for your cluster)
-os.environ["CUDA_VISIBLE_DEVICES"] = "0, 5"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3, 6"
 
 #3 and 4 GPU are the best
 #0 and 5 seem to work ok too
@@ -134,6 +134,7 @@ if __name__ == "__main__":
 
 
     mask_modes = parse_mask_regions(args.mask_regions)
+    mask_modes_tag = "__".join(mask_modes)
     print(f"✅ mask_modes={mask_modes}")
 
 
@@ -163,13 +164,13 @@ if __name__ == "__main__":
 
 
     # Output file for sentence probabilities
-    output_path_prob = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_knockout_200_16F_{query_scope}_{subdataset}_{video_mode}_{mask_modes}_PROVANEW.jsonl")
+    output_path_prob = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_knockout_200_16F_{query_scope}_{subdataset}_{video_mode}_mask_{mask_modes_tag}_PROVA.jsonl")
 
     # Output file for attention weights (token-wise + top-k)
-    output_path_attn = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_weights_200_16F_{query_scope}_{subdataset}_{video_mode}_{mask_modes}.jsonl")
+    output_path_attn = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_weights_200_16F_{query_scope}_{subdataset}_{video_mode}_mask_{mask_modes_tag}.jsonl")
 
     # Directory to store full attention matrices as .pt files (one per item)
-    attn_pt_dir = f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/attn_matrices_pt_{query_scope}_{subdataset}_{video_mode}_{mask_modes}"
+    attn_pt_dir = f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/attn_matrices_pt_{query_scope}_{subdataset}_{video_mode}_mask_{mask_modes_tag}"
     
     os.makedirs(os.path.dirname(output_path_prob), exist_ok=True)
     os.makedirs(os.path.dirname(output_path_attn), exist_ok=True)
