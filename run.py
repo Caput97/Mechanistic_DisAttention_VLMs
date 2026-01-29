@@ -67,14 +67,78 @@ if __name__ == "__main__":
     help="Select which video to use: per-item video from dataset ('video') or a fixed black video ('black_video')."
 )
 
+
+    parser.add_argument(
+    "--mask_regions",
+    type=str,
+    default="all_regions",
+    help=(
+        "Which regions to mask. "
+        "Use 'all_regions' for the default set, "
+        "'none' for baseline only, "
+        "or a comma-separated list: user_role,user_text,video,A_content,B_content,video1half,video2half"
+    ),
+)
+
     args = parser.parse_args()
 
     RUN_MODE = args.run_mode
     query_scope = args.query_scope
-    #print(f"✅ RUN_MODE={RUN_MODE} | query_scope={query_scope}")
-
     video_mode = args.video_mode
-    print(f"✅ RUN_MODE={RUN_MODE} | query_scope={query_scope} | video_mode={video_mode}")
+
+    MASK_REGION_MAP = {
+    # CLI name      # internal name used by build_key_spans_for_mode()
+    "none": "none",
+    "user_role": "user",
+    "user_text": "user_text",
+    "video": "vision",
+    "A_content": "A_content",
+    "B_content": "B_content",
+    "video1half": "vision_half1",
+    "video2half": "vision_half2",
+    }
+
+    DEFAULT_MASK_MODES = [
+        "none", "user", "vision", "vision_half1", "vision_half2",
+        "user_text", "A_content", "B_content"
+    ]
+
+    def parse_mask_regions(mask_regions_str: str):
+        s = (mask_regions_str or "").strip()
+        if not s or s == "all_regions":
+            return DEFAULT_MASK_MODES
+
+        if s == "none":
+            return ["none"]
+
+        # comma-separated list
+        parts = [p.strip() for p in s.split(",") if p.strip()]
+        out = []
+        for p in parts:
+            if p not in MASK_REGION_MAP:
+                raise ValueError(
+                    f"Unknown --mask_regions value '{p}'. "
+                    f"Valid: all_regions, none, {', '.join(MASK_REGION_MAP.keys())}"
+                )
+            out.append(MASK_REGION_MAP[p])
+
+        # remove duplicates while preserving order
+        seen = set()
+        out_unique = []
+        for m in out:
+            if m not in seen:
+                out_unique.append(m)
+                seen.add(m)
+
+        return out_unique
+
+
+    mask_modes = parse_mask_regions(args.mask_regions)
+    print(f"✅ mask_modes={mask_modes}")
+
+
+
+    print(f"✅ RUN_MODE={RUN_MODE} | query_scope={query_scope} | video_mode={video_mode} | ✅ mask_modes={mask_modes}")
 
 
 
@@ -99,13 +163,13 @@ if __name__ == "__main__":
 
 
     # Output file for sentence probabilities
-    output_path_prob = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_knockout_200_16F_{query_scope}_{subdataset}_{video_mode}_PROVANEW.jsonl")
+    output_path_prob = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_knockout_200_16F_{query_scope}_{subdataset}_{video_mode}_{mask_modes}_PROVANEW.jsonl")
 
     # Output file for attention weights (token-wise + top-k)
-    output_path_attn = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_weights_200_16F_{query_scope}_{subdataset}_{video_mode}.jsonl")
+    output_path_attn = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_weights_200_16F_{query_scope}_{subdataset}_{video_mode}_{mask_modes}.jsonl")
 
     # Directory to store full attention matrices as .pt files (one per item)
-    attn_pt_dir = f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/attn_matrices_pt_{query_scope}_{subdataset}_{video_mode}"
+    attn_pt_dir = f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/attn_matrices_pt_{query_scope}_{subdataset}_{video_mode}_{mask_modes}"
     
     os.makedirs(os.path.dirname(output_path_prob), exist_ok=True)
     os.makedirs(os.path.dirname(output_path_attn), exist_ok=True)
@@ -169,7 +233,7 @@ if __name__ == "__main__":
             foil = item["foil"]
             target = item["caption_position"] # 0 or 1 --> 0 means caption is B, 1 means caption is A 
 
-            mask_modes = ["none", "user", "vision", "vision_half1", "vision_half2", "user_text", "A_content", "B_content" ]
+            #mask_modes = ["none", "user", "vision", "vision_half1", "vision_half2", "user_text", "A_content", "B_content" ]
             
 
             if RUN_MODE == "prob":
