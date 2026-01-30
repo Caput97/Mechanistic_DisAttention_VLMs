@@ -35,6 +35,7 @@ def track_attention_layerwise(
     mask_mode: str = "none",
     query_scope: str = "assistant_token",
     top_k: int = 3,
+    return_per_head: bool = False,
 ):
     """
     Track attention distributions for caption and foil sentences layer-wise
@@ -152,6 +153,61 @@ def track_attention_layerwise(
                 # Query rows: predictive rows (masked rows)
                 query_attn = attn_layer[:, qrows, :]  # [heads, Q, seq_len]
                 query_attn = query_attn.to(torch.float32)
+
+
+                #### the following part is for per-head analysis ####
+                per_head = None
+                if return_per_head:
+                    H = query_attn.shape[0]
+                    Q = query_attn.shape[1]
+
+                    # Mass per head per region: list length H for each region
+                    head_region_mass = {}
+                    for r in regions:
+                        idxs = region_indices[r]
+                        if not idxs:
+                            head_region_mass[r] = [0.0] * H
+                            continue
+
+                        # query_attn[:, :, idxs] -> [H, Q, |idxs|]
+                        # sum over keys in region -> [H, Q]
+                        # mean over query rows -> [H]
+                        mass_h = query_attn[:, :, idxs].sum(dim=-1).mean(dim=-1)  # [H]
+                        head_region_mass[r] = mass_h.detach().cpu().tolist()
+
+                    # Top3 video/text by contrast = m_video - m_user_text
+                    mv = np.array(head_region_mass.get("video", [0.0]*H), dtype=np.float32)
+                    mt = np.array(head_region_mass.get("user_text", [0.0]*H), dtype=np.float32)
+                    contrast = mv - mt
+
+                    # indices sorted by contrast
+                    order_desc = contrast.argsort()[::-1]
+                    order_asc  = contrast.argsort()
+
+                    # Prefer heads with correct sign; fallback if not enough
+                    pos = [int(i) for i in order_desc if contrast[i] > 0]
+                    neg = [int(i) for i in order_asc  if contrast[i] < 0]
+
+                    top3_video = pos[:3] if len(pos) >= 3 else [int(i) for i in order_desc[:3]]
+                    top3_text  = neg[:3] if len(neg) >= 3 else [int(i) for i in order_asc[:3]]
+
+                    def pack(head_idx: int):
+                        return {
+                            "head_idx": int(head_idx),
+                            "video_mass": float(mv[head_idx]),
+                            "user_text_mass": float(mt[head_idx]),
+                            "contrast": float(contrast[head_idx]),
+                        }
+
+                    per_head = {
+                        "head_region_mass": head_region_mass,          # dict: region -> [H floats]
+                        "contrast_video_vs_user_text": contrast.tolist(),# [H floats]
+                        "top3_video_heads": [pack(i) for i in top3_video],
+                        "top3_user_text_heads": [pack(i) for i in top3_text],
+                    }
+
+                    #### end of per-head analysis ####
+
                 mean_over_heads = query_attn.mean(dim=0)  # [Q, seq_len]
                 mean_np = mean_over_heads.detach().cpu().numpy()
 
@@ -240,8 +296,10 @@ def track_attention_layerwise(
                     "target_tokens": target_tokens,  # only actual sentence tokens
                     "query_rows_used": query_rows_used,
                     "topk": topk_info,               # aligned to target token indices
-                    "region_stats": region_stats
+                    "region_stats": region_stats  
                 }
+                if return_per_head:
+                    label_results[layer_key]["per_head"] = per_head
 
         results_attn_layerwise[label] = label_results
         clear_mask_ranges(model)
