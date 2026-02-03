@@ -1,0 +1,24 @@
+{
+  "value_type": "logprob",
+  "value_column": "mean_logprob",
+  "percentile": 99.0,
+  "none_key": "none",
+  "scales": {
+    "caption_minus_foil": {
+      "vmin": -0.3298506035208684,
+      "vmax": 0.3298506035208684
+    },
+    "masked_minus_none": {
+      "vmin": -4.243631639289851,
+      "vmax": 4.243631639289851
+    }
+  },
+  "n_files": 4,
+  "input_files": [
+    "/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_knockout_100_16F_ass_cont_realVideos_EN_spatial.jsonl",
+    "/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_knockout_100_16F_ass_cont_realVideos_EN_temporal.jsonl",
+    "/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_knockout_200_16F_assistant_content_ITA_temporal.jsonl",
+    "/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_knockout_200_16F_assistant_content_ITA_spatial.jsonl"
+  ],
+  "cli_command": "Attn_knockout_prob_plots_comparableValues.py --input /home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_knockout_100_16F_ass_cont_realVideos_EN_spatial.jsonl /home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_knockout_100_16F_ass_cont_realVideos_EN_temporal.jsonl /home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_knockout_200_16F_assistant_content_ITA_temporal.jsonl /home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_knockout_200_16F_assistant_content_ITA_spatial.jsonl --outdir /home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/plotting_results/plots/spa_temp_eng"
+}
