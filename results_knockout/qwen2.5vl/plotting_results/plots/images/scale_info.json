@@ -1,0 +1,21 @@
+{
+  "value_type": "logprob",
+  "value_column": "mean_logprob",
+  "percentile": 99.0,
+  "none_key": "none",
+  "scales": {
+    "caption_minus_foil": {
+      "vmin": -0.4618487434148787,
+      "vmax": 0.4618487434148787
+    },
+    "masked_minus_none": {
+      "vmin": -3.76342233878374,
+      "vmax": 3.76342233878374
+    }
+  },
+  "n_files": 1,
+  "input_files": [
+    "/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/Attn_knockout_100_16F_assistant_content_img_eng_video_mask_none__user__vision__vision_half1__vision_half2__user_text__A_content__B_content.jsonl"
+  ],
+  "cli_command": "Attn_knockout_prob_plots_comparableValues.py --input /home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/Attn_knockout_100_16F_assistant_content_img_eng_video_mask_none__user__vision__vision_half1__vision_half2__user_text__A_content__B_content.jsonl --outdir /home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/plotting_results/plots/images --value-type logprob --percentile 99 --none-key none"
+}

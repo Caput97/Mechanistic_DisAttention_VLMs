@@ -1,0 +1,5 @@
+file,subdir,cf_n_points,cf_n_clipped,cf_perc_clipped,cf_max_abs_delta,mvn_n_points,mvn_n_clipped,mvn_perc_clipped,mvn_max_abs_delta
+Attn_knockout_100_16F_ass_cont_realVideos_EN_spatial.jsonl,EN_spatial,224,0,0.0,0.18195830464363105,392,5,1.2755102040816326,5.038698210716248
+Attn_knockout_100_16F_ass_cont_realVideos_EN_temporal.jsonl,EN_temporal,224,1,0.44642857142857145,0.3499865698814393,392,9,2.295918367346939,5.663631260395049
+Attn_knockout_200_16F_assistant_content_ITA_temporal.jsonl,ITA_temporal,224,8,3.5714285714285716,0.5184428266063333,392,2,0.5102040816326531,4.404325553178787
+Attn_knockout_200_16F_assistant_content_ITA_spatial.jsonl,ITA_spatial,224,0,0.0,0.1760363698005678,392,0,0.0,4.168840676248074
