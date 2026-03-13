@@ -42,7 +42,6 @@ idna==3.10
 importlib_metadata @ file:///home/conda/feedstock_root/build_artifacts/importlib-metadata_1737420181517/work
 ipykernel @ file:///home/conda/feedstock_root/build_artifacts/ipykernel_1719845459717/work
 ipython @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_ipython_1745673194/work
-it_core_news_sm @ https://github.com/explosion/spacy-models/releases/download/it_core_news_sm-3.8.0/it_core_news_sm-3.8.0-py3-none-any.whl#sha256=3f617bf9a8ae0418953cf1fbf014e10272684c4229e882a7fd748b637d0100bf
 jedi @ file:///home/conda/feedstock_root/build_artifacts/jedi_1733300866624/work
 Jinja2==3.1.4
 jiter==0.9.0

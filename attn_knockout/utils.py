@@ -5,10 +5,53 @@ from PIL import Image
 from qwen_vl_utils import process_vision_info
 
 
-
+#quando torno a modalità video, devo cambiare tutti i image_pad in video_pad dove sono tra virgolette. il resto dei nomi variabili l'ho mantenuto a video_pad 
 # -----------------------------------------------------------------------------
 # Message builders (video + text chat format)
 # -----------------------------------------------------------------------------
+
+#version of prompt with image + text
+
+def build_message_VT(prompt_text: str, video_path: str, target_sent: str):
+    """
+    Build a chat message where the user provides:
+      - an image
+      - a multiple-choice prompt
+    and the assistant provides the target answer (caption or foil).
+
+    This format is used to compute probabilities for the target sentence
+    given video + prompt as context.
+    """
+    message = [
+        {
+            "role": "system",
+            "content": [
+                {"type": "text", "text": "You are a helpful assistant."},
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "image": video_path,
+                    "max_pixels": 360 * 420,
+                    
+                },
+                {"type": "text", "text": prompt_text},
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": target_sent},
+            ],
+        },
+    ]
+    return message
+
+'''
+#final version for VT generation (prompt + video as input, generation of A/B as output)
 
 def build_message_VT(prompt_text: str, video_path: str, target_sent: str):
     """
@@ -54,6 +97,9 @@ def build_message_VT(prompt_text: str, video_path: str, target_sent: str):
     return message
 
 '''
+
+
+'''
 #build the message text+video
 
 def build_message_TV(prompt_text, video_path):
@@ -85,6 +131,8 @@ def build_message_TV(prompt_text, video_path):
 # Pre-processing / inference utilities
 # -----------------------------------------------------------------------------
 
+'''
+#official inference function (with chat template + vision processing)
 
 def inference(message, processor, model):
     """
@@ -126,6 +174,45 @@ def inference(message, processor, model):
     )
 
     return text, inputs, video_inputs, video_kwargs
+'''
+
+#inference with images
+def inference(message, processor, model):
+    """
+    Apply the chat template and process both text and image inputs.
+
+    Returns:
+        text: formatted text string from the chat template
+        inputs: processed inputs ready for the model
+        video_inputs: processed video tensors
+        video_kwargs: additional video-related kwargs
+    """
+    # Apply chat template (no tokenization yet, just formatting)
+    text = processor.apply_chat_template(
+        message,
+        tokenize=False,
+        add_generation_prompt=False
+    )
+    #print("Formatted text:", text)
+
+    # Extract image/video info for the processor
+    image_inputs, video_inputs = process_vision_info(
+        message
+    )
+
+    #print(type(video_inputs), type(image_inputs))
+
+    # --> Call processor with formatted text and extracted vision data
+    inputs = processor(
+        text=[text],
+        images=image_inputs,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt",
+    )
+
+    return text, inputs, video_inputs, None
+
 
 
 def get_video_id(video_id_str: str) -> str:
@@ -209,7 +296,7 @@ def get_key_positions(inputs, tokenizer):
     )
 
     # All video_pad positions
-    positions["video_pad"] = [i for i, t in enumerate(tokens) if t == "<|video_pad|>"]
+    positions["image_pad"] = [i for i, t in enumerate(tokens) if t == "<|image_pad|>"]
 
     # All <|im_start|> and <|im_end|> positions
     im_start_positions = [i for i, t in enumerate(tokens) if t == "<|im_start|>"]
@@ -283,7 +370,7 @@ def build_key_spans_for_mode(positions, mode: str):
     B_start = positions.get("B_content_start", None)
     B_end   = positions.get("B_content_end", None)
 
-    video_pads = positions.get("video_pad", [])
+    video_pads = positions.get("image_pad", [])
 
     if mode == "none":
         return []
@@ -394,7 +481,7 @@ def get_token_region(idx: int, positions: dict) -> str:
       - "user_text": other tokens in the user message (between vision_end and user_im_end)
       - "other": system tokens, assistant tokens, or anything not covered above
     """
-    video_pads = set(positions.get("video_pad", []))
+    video_pads = set(positions.get("image_pad", []))
     A_start = positions.get("A_content_start", None)
     A_end   = positions.get("A_content_end", None)
     B_start = positions.get("B_content_start", None)
@@ -417,3 +504,192 @@ def get_token_region(idx: int, positions: dict) -> str:
     return "other"
 
 
+#########################################
+#Generation utilities
+#########################################
+
+# --- NEW: A/B prompt + inference + layerwise A/B tracking ---
+
+import math
+import torch
+import torch.nn.functional as F
+
+from attn_knockout.patching import set_mask_ranges, clear_mask_ranges
+
+
+def build_ab_prompt(prompt_text: str) -> str:
+    """
+    Standardizziamo SEMPRE così:
+      - istruzione: 'Rispondi solo A o B.'
+      - anchor: 'Risposta:'
+    """
+    base = (prompt_text or "").rstrip()
+    return base + "\nRispondi solo A o B.\nRisposta:\n"
+
+
+def build_message_VT_gen(prompt_text: str, video_path: str):
+    """
+    Messaggio chat con SYSTEM + USER (video+testo) e poi generation prompt per ASSISTANT.
+    Nota: NON mettiamo contenuto assistant, perché vogliamo la distribuzione del *primo token generato*.
+    """
+    message = [
+        {
+            "role": "system",
+            "content": [{"type": "text", "text": "You are a helpful assistant."}],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "video",
+                    "video": video_path,
+                    "max_pixels": 360 * 420,
+                    "fps": 0.55,
+                },
+                {"type": "text", "text": prompt_text},
+            ],
+        },
+    ]
+    return message
+
+
+def inference_gen(message, processor, model):
+    """
+    Come inference(), ma con add_generation_prompt=True per ottenere i token dell'assistant "vuoti",
+    così il modello predice il prossimo token (A/B) subito dopo.
+    """
+    text = processor.apply_chat_template(
+        message,
+        tokenize=False,
+        add_generation_prompt=True,   # <-- QUI la differenza
+    )
+
+    image_inputs, video_inputs, video_kwargs = process_vision_info(message, return_video_kwargs=True)
+
+    inputs = processor(
+        text=[text],
+        images=image_inputs,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt",
+        **video_kwargs,
+    )
+
+    return text, inputs, video_inputs, video_kwargs
+
+
+def _get_single_token_id(tokenizer, s: str) -> int:
+    ids = tokenizer.encode(s, add_special_tokens=False)
+    if len(ids) != 1:
+        raise ValueError(f"Expected '{s}' to be single-token, got ids={ids}")
+    return ids[0]
+
+
+def _get_ab_token_ids(tokenizer):
+    a_id = _get_single_token_id(tokenizer, "A")
+    b_id = _get_single_token_id(tokenizer, "B")
+    return a_id, b_id
+
+
+def _layerwise_ab_from_hidden_states(model, lm_head, hidden_states, tokenizer):
+    """
+    hidden_states: output.hidden_states (tuple)
+      hidden_states[0]=embeddings, hidden_states[1]=layer0, ...
+    Noi vogliamo i logits del NEXT token => usiamo la rappresentazione dell'ULTIMO token in input (index -1).
+    """
+    a_id, b_id = _get_ab_token_ids(tokenizer)
+
+    # nel tuo tracking_prob: norm applicata a tutti tranne l'ultimo hidden_state
+    norm = model.model.norm
+
+    num_layers = len(model.model.layers)
+    out = {f"layer_{i}": {} for i in range(num_layers)}
+
+    # loop come nel tuo codice: layer_idx in range(1, len(hidden_states)) => layer_0..layer_{n-1}
+    for layer_idx in range(1, len(hidden_states)):
+        h = hidden_states[layer_idx][0]         # [seq, hidden]
+        last = h[-1]                             # [hidden] ultimo token in input
+
+        if layer_idx != len(hidden_states) - 1:
+            last = norm(last)
+        # else: ultimo layer già "finale"
+
+        logits = lm_head(last)                   # [vocab]
+        logit_a = logits[a_id]
+        logit_b = logits[b_id]
+
+        # softmax SOLO su {A,B}
+        ab = torch.stack([logit_a, logit_b], dim=0)
+        p = F.softmax(ab.float(), dim=0)
+
+        layer_key = f"layer_{layer_idx - 1}"
+        out[layer_key] = {
+            "logit_A": float(logit_a.item()),
+            "logit_B": float(logit_b.item()),
+            "p_A": float(p[0].item()),
+            "p_B": float(p[1].item()),
+            "margin": float((logit_a - logit_b).item()),
+            "pred": "A" if logit_a.item() >= logit_b.item() else "B",
+        }
+
+    return out
+
+
+def track_ab_prob_layerwise(
+    prompt: str,
+    video_path: str,
+    model,
+    processor,
+    tokenizer,
+    lm_head,
+    mask_mode: str = "none",
+    query_scope: str = "assistant_token",
+):
+    """
+    Per un dato prompt+video:
+      - costruisce chat con generation prompt
+      - calcola positions
+      - maschera secondo mask_mode & query_scope
+      - fa 1 forward con hidden_states
+      - ritorna dict layerwise con p_A, p_B, margin, pred
+    """
+    prompt_ab = build_ab_prompt(prompt)
+
+    # 1) build message + inputs (generation prompt)
+    message = build_message_VT_gen(prompt_ab, video_path)
+    text, inputs, video_inputs, video_kwargs = inference_gen(message, processor, model)
+
+    # IMPORTANT: manda su device come fai altrove (qui non era nel tuo inference originale)
+    inputs = {k: v.to(model.device) if hasattr(v, "to") else v for k, v in inputs.items()}
+
+    # 2) positions per span A/B + vision/user ecc.
+    positions = get_key_positions(inputs, tokenizer)
+
+    # 3) definiamo "text_start" come la posizione del PRIMO token che verrà generato.
+    #    Siccome usiamo add_generation_prompt=True e non abbiamo ancora generato nulla,
+    #    il NEXT token sta in posizione seq_len (non esiste ancora nei input_ids).
+    seq_len = inputs["input_ids"].shape[1]
+    text_start = seq_len
+    text_end = seq_len + 1  # serve solo per la logica di get_query_rows
+
+    # 4) build mask ranges (riuso identico delle tue funzioni)
+    key_spans = build_key_spans_for_mode(positions, mask_mode)
+    query_rows = get_query_rows(query_scope, positions, text_start, text_end)
+    mask_ranges = build_mask_ranges(query_rows, key_spans)
+
+    set_mask_ranges(model, mask_ranges)
+
+    # 5) forward
+    with torch.no_grad():
+        output = model(
+            **inputs,
+            use_cache=False,
+            output_attentions=False,
+            output_hidden_states=True,
+        )
+
+    hidden_states = output.hidden_states
+    layerwise = _layerwise_ab_from_hidden_states(model, lm_head, hidden_states, tokenizer)
+
+    clear_mask_ranges(model)
+    return layerwise

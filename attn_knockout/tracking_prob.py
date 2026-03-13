@@ -28,6 +28,7 @@ from attn_knockout.patching import (
 # Scoring utilities
 # -----------------------------------------------------------------------------
 
+
 def get_target_sent_score_from_logits(
     logits: torch.Tensor,
     inputs,
@@ -93,9 +94,12 @@ def get_target_sent_score_from_logits(
 
 
 
+
 # -----------------------------------------------------------------------------
 # Tracking functions (sentence probabilities across layers / positions)
 # -----------------------------------------------------------------------------
+
+
 
 def track_sentence_prob_layerwise(
     prompt: str,
@@ -163,75 +167,7 @@ def track_sentence_prob_layerwise(
             assistant_nl_idx,
         )
 
-        '''
-
-        # ================= DEBUG MASK SETUP =================
-        tokens = tokenizer.convert_ids_to_tokens(inputs.input_ids[0])
-
-        print("\n================ MASK DEBUG =================")
-        print("query_scope:", query_scope)
-        print("mask_mode:", mask_mode)
-        print("text_start, text_end:", start, end)
-        print("target tokens:", tokens[start:end])
-
-        key_spans = build_key_spans_for_mode(positions, mask_mode)
-        query_rows = get_query_rows(query_scope, positions, start, end)
-        mask_ranges = build_mask_ranges(query_rows, key_spans)
-
-        print("key_spans (keys masked):")
-        for ks, ke in key_spans:
-            print(f"  cols [{ks},{ke}) ->", tokens[ks:ke][:10], "...")
-
-        print("query_rows (rows masked) first5:", query_rows[:5], "last5:", query_rows[-5:], "len=", len(query_rows))
-
-
-        print("mask_ranges (row, col_start, col_end):")
-        for r, ks, ke in mask_ranges[:5]:
-            print(f"  row {r} token='{tokens[r]}'  cols [{ks},{ke})")
-
         
-        print("positions:", {k: positions[k] for k in [
-            "vision_start","vision_end","user_im_end","assistant","assistant\n",
-            "A","B","A_content_start","A_content_end","B_content_start","B_content_end"
-        ]})
-        print("text_start, text_end:", start, end)
-
-        print("mask_ranges first5:", mask_ranges[:5])
-        print("mask_ranges last5:", mask_ranges[-5:])
-        print("n mask_ranges:", len(mask_ranges))
-
-
-
-        print("============================================\n")
-                # ===================================================
-
-        
-        '''
-
-        '''
-        # DEBUG: verifica nuova modalità vision_half
-        pads = positions["video_pad"]
-        n = len(pads)
-        half = n // 2
-        print("n pads:", n)
-        print("first half: ", pads[0], "→", pads[half-1])
-        print("second half:", pads[half], "→", pads[-1])
-
-        print("mask_ranges half_1:", build_mask_ranges_for_mode(positions, "vision_half1"))
-        print("mask_ranges half_2:", build_mask_ranges_for_mode(positions, "vision_half2"))
-        # -------------------------------------------
-
-        
-        # ---------------- DEBUG ----------------
-        tokens = tokenizer.convert_ids_to_tokens(inputs.input_ids[0])
-        for i, t in enumerate(tokens):
-            print(i, t)
-
-        print("assistant\\n idx:", positions["assistant\n"])
-        print("target span:", start, end)
-        print("Target tokens:", tokens[start:end])
-        # ---------------------------------------
-        '''
 
         # 3) Build attention mask ranges for the chosen masking configuration
 
@@ -300,3 +236,4 @@ def track_sentence_prob_layerwise(
     clear_mask_ranges(model)
 
     return results_layerwise
+

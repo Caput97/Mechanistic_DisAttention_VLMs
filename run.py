@@ -1,6 +1,6 @@
 import os
 # Limit visible GPUs (optional, keep if needed for your cluster)
-os.environ["CUDA_VISIBLE_DEVICES"] = "3, 6"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3, 4"
 
 #3 and 4 GPU are the best
 #0 and 5 seem to work ok too
@@ -10,16 +10,21 @@ import sys
 sys.path.insert(0, "/home/dtesta/miniconda3/envs/qwenVL/lib/python3.10/site-packages")
 
 from setproctitle import setproctitle
-setproctitle("Attention_Knockout_VLM")
+setproctitle("Attn_VLM")
 
 import re
 from collections import defaultdict
 import requests
-import torchvision.transforms as T
+
 import argparse
 from tqdm import tqdm
 import av
+
 import torch
+
+
+
+import torchvision.transforms as T
 import torch.nn.functional as F
 import numpy as np
 import json
@@ -79,12 +84,29 @@ if __name__ == "__main__":
         "or a comma-separated list: user_role,user_text,video,A_content,B_content,video1half,video2half"
     ),
 )
+    
+    parser.add_argument(
+    "--attn_per_head",
+    action="store_true",
+    help="If set (only in attention_weights mode), also compute per-head attention mass and save to a separate JSONL."
+)
+    
+    parser.add_argument(
+    "--attn_per_head_only",
+    action="store_true",
+    help="If set, in attention_weights mode compute/save ONLY per-head stats (skip average/topk JSONL)."
+)
+
 
     args = parser.parse_args()
 
     RUN_MODE = args.run_mode
     query_scope = args.query_scope
     video_mode = args.video_mode
+    ATTN_PER_HEAD = args.attn_per_head or args.attn_per_head_only
+    ATTN_PER_HEAD_ONLY = args.attn_per_head_only
+
+
 
     MASK_REGION_MAP = {
     # CLI name      # internal name used by build_key_spans_for_mode()
@@ -135,11 +157,22 @@ if __name__ == "__main__":
 
     mask_modes = parse_mask_regions(args.mask_regions)
     mask_modes_tag = "__".join(mask_modes)
-    print(f"✅ mask_modes={mask_modes}")
+    
+
+    if RUN_MODE == "attention_weights":
+        if ATTN_PER_HEAD_ONLY:
+            attn_mode_str = "per_head_ONLY"
+        elif ATTN_PER_HEAD:
+            attn_mode_str = "average_&_per_head"
+        else:
+            attn_mode_str = "average_only"
+    else:
+        attn_mode_str = "N/A"
 
 
 
-    print(f"✅ RUN_MODE={RUN_MODE} | query_scope={query_scope} | video_mode={video_mode} | ✅ mask_modes={mask_modes}")
+
+    print(f"✅ RUN_MODE={RUN_MODE} | query_scope={query_scope} | video_mode={video_mode} | ✅ mask_modes={mask_modes} | attention_mode={attn_mode_str}")
 
 
 
@@ -150,12 +183,21 @@ if __name__ == "__main__":
     #mc_data = '/home/dtesta/XAI-VLMs-MC_consistency/MAIA_MC_task_SpazialeTotale.json'  
     #mc_data = "/home/dtesta/XAI-VLMs-MC_consistency/MAIA_MC_task_TemporaleParziale.json"
     #mc_data = "/home/dtesta/VLM_interpretability/MAIA_MC_task_TemporaleParziale_itempool1.json"
-    mc_data = "/home/dtesta/VLM_interpretability/MAIA_MC_task_SpazialeParziale_itempool1.json"
-
-    subdataset = "spatial"
+    #mc_data = "/home/dtesta/VLM_interpretability/MAIA_MC_task_SpazialeParziale_itempool1.json"
+    #mc_data = "/home/dtesta/Mechanistic_DisAttention_VLMs/data/MAIA_MC_task_Spatial_itempool1_100_eng.json"
+    #mc_data = "/home/dtesta/Mechanistic_DisAttention_VLMs/data/MAIA_MC_task_TemporaleParziale_itempool1_100_eng.json"
+    #mc_data = "/home/dtesta/Mechanistic_DisAttention_VLMs/data/MAIA_MC_task_Causale_itempool1.json"
+    #mc_data = "/home/dtesta/Mechanistic_DisAttention_VLMs/data/MAIA_MC_task_SpazialeParziale_itempool1_fakeFoils.json"
+    #mc_data = "/home/dtesta/Mechanistic_DisAttention_VLMs/data/MAIA_MC_task_priorCheck_itempool1.json"
+    mc_data = "/home/dtesta/Mechanistic_DisAttention_VLMs/data/winoground/winoground_caption_foil_mc.json"
+    #subdataset = "spatial"
     #subdataset = "temporal"
+    #subdataset = "causal"
+    #subdataset = "fakeFoils"
+    subdataset = "img"
 
-    video_folder = "/home/dtesta/MAIA_def/dataset_def/videos"
+    #video_folder = "/home/dtesta/MAIA_def/dataset_def/videos"
+    video_folder = "/home/dtesta/Mechanistic_DisAttention_VLMs/data/winoground/img_winoground"
     black_video_path = "/home/dtesta/MAIA_def/dataset_def/videos/black_video.mp4"
 
     if video_mode == "black_video" and not os.path.exists(black_video_path):
@@ -164,17 +206,30 @@ if __name__ == "__main__":
 
 
     # Output file for sentence probabilities
-    output_path_prob = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_knockout_200_16F_{query_scope}_{subdataset}_{video_mode}_mask_{mask_modes_tag}_PROVA.jsonl")
+    output_path_prob = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/Attn_knockout_100_16F_{query_scope}_{subdataset}_eng_{video_mode}_mask_{mask_modes_tag}.jsonl")
+    #output_path_prob = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/Attn_knockout_40_16F_ass_cont_priors_ita.jsonl")
 
     # Output file for attention weights (token-wise + top-k)
-    output_path_attn = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/Attn_weights_200_16F_{query_scope}_{subdataset}_{video_mode}_mask_{mask_modes_tag}.jsonl")
+    output_path_attn = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/Attn_weights_100_16F_{query_scope}_{subdataset}_eng_{video_mode}_mask_{mask_modes_tag}_{attn_mode_str}.jsonl")
+    #output_path_attn = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/Attn_weights_40_16F_ass_cont_priors_ita.jsonl")
+
+    output_path_attn_per_head = (
+    f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/"
+    f"attn_weights_per_head_100_16F_{query_scope}_{subdataset}_eng_{video_mode}_mask_{mask_modes_tag}_{attn_mode_str}.jsonl"
+)  
+    #output_path_attn_per_head = (
+    #f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/"
+    #f"attn_weights_per_head__40_16F_ass_cont_priors_ita.jsonl"
+#)
+
 
     # Directory to store full attention matrices as .pt files (one per item)
-    attn_pt_dir = f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/attn_matrices_pt_{query_scope}_{subdataset}_{video_mode}_mask_{mask_modes_tag}"
+    #attn_pt_dir = f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/attn_matrices_pt_{query_scope}_{subdataset}_{video_mode}_mask_{mask_modes_tag}_{attn_mode_str}"
     
     os.makedirs(os.path.dirname(output_path_prob), exist_ok=True)
     os.makedirs(os.path.dirname(output_path_attn), exist_ok=True)
-    os.makedirs(attn_pt_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(output_path_attn_per_head), exist_ok=True)
+    #os.makedirs(attn_pt_dir, exist_ok=True)
 
 
     model_id = "Qwen/Qwen2.5-VL-7B-Instruct"
@@ -218,7 +273,7 @@ if __name__ == "__main__":
 
     # Example: process only a slice of the dataset (here item 6)
     #for idx, item in enumerate(tqdm(data[6:7], desc="Processing items"), start=6):
-    for idx, item in enumerate(tqdm(data[:1], desc="Processing items")):
+    for idx, item in enumerate(tqdm(data[:100], desc="Processing items")):
 
         try:
             prompt = item["multiple_choice_prompt"]
@@ -226,8 +281,13 @@ if __name__ == "__main__":
             if video_mode == "black_video":
                 video_path = black_video_path
             else:
-                number = get_video_id(video_id)
-                video_path = os.path.join(video_folder, f"{number}.mp4")
+                
+                #da rimettere se uso i video
+                #number = get_video_id(video_id)
+                #video_path = os.path.join(video_folder, f"{number}.mp4")
+
+                #solo per img
+                video_path = os.path.join(video_folder, f"{video_id}.jpg")
 
 
             caption = item["caption"]
@@ -286,17 +346,15 @@ if __name__ == "__main__":
                 #   - Save full attn matrices per item in a .pt file
                 #   - Save only topk, target_tokens and region_stats in JSONL
                 # ----------------------------------------
-                final_results_attn = {
-                    "caption": {},
-                    "foil": {}
-                }
 
-                # This dict will store all full attention matrices for this item
-                # to be saved as a single .pt file.
-                attn_mats_item = {
-                    "caption": {},
-                    "foil": {}
-                }
+                # average outputs (only if not per-head-only)
+                final_results_attn = {"caption": {}, "foil": {}} if not ATTN_PER_HEAD_ONLY else None
+                attn_mats_item     = {"caption": {}, "foil": {}} if not ATTN_PER_HEAD_ONLY else None
+
+                # per-head outputs (only if ATTN_PER_HEAD is True)
+                final_results_attn_per_head = {"caption": {}, "foil": {}} if ATTN_PER_HEAD else None
+
+
 
                 for mode in mask_modes:
                     attn_track = track_attention_layerwise(
@@ -309,6 +367,7 @@ if __name__ == "__main__":
                         tokenizer,
                         mask_mode=mode,
                         query_scope=query_scope,
+                        return_per_head=ATTN_PER_HEAD
                     )
 
                     # attn_track structure:
@@ -322,21 +381,30 @@ if __name__ == "__main__":
                             continue
 
                         for layer_key, layer_content in attn_track[label].items():
-                            # 1) Store full attn tensor for .pt saving
-                            if layer_key not in attn_mats_item[label]:
-                                attn_mats_item[label][layer_key] = {}
-                            attn_mats_item[label][layer_key][mode] = layer_content["attn_tensor"]
+                            # 1) Save average summaries (only if not per-head-only)
+                            if not ATTN_PER_HEAD_ONLY:
+                                # 1) Store full attn tensor for .pt saving
+                                #if layer_key not in attn_mats_item[label]:
+                                #    attn_mats_item[label][layer_key] = {}
+                                #attn_mats_item[label][layer_key][mode] = layer_content["attn_tensor"]
 
-                            # 2) Store only lightweight summaries in JSON
-                            if layer_key not in final_results_attn[label]:
-                                final_results_attn[label][layer_key] = {}
+                                # 2) Store only lightweight summaries in JSON
+                                if layer_key not in final_results_attn[label]:
+                                    final_results_attn[label][layer_key] = {}
 
-                            final_results_attn[label][layer_key][mode] = {
-                                "target_tokens": layer_content["target_tokens"],
-                                "query_rows_used": layer_content["query_rows_used"],
-                                "topk": layer_content["topk"],
-                                "region_stats": layer_content["region_stats"],
-                            }
+                                final_results_attn[label][layer_key][mode] = {
+                                    "target_tokens": layer_content["target_tokens"],
+                                    "query_rows_used": layer_content["query_rows_used"],
+                                    "topk": layer_content["topk"],
+                                    "region_stats": layer_content["region_stats"],
+                                }
+
+                            # 3) Store per-head results (optional)
+                            if ATTN_PER_HEAD and "per_head" in layer_content:
+                                if layer_key not in final_results_attn_per_head[label]:
+                                    final_results_attn_per_head[label][layer_key] = {}
+                                final_results_attn_per_head[label][layer_key][mode] = layer_content["per_head"]
+
 
                 # Save all attention matrices for this item as a single .pt file
                 #attn_pt_path = os.path.join(
@@ -345,19 +413,35 @@ if __name__ == "__main__":
                 #)
                 #torch.save(attn_mats_item, attn_pt_path)
 
+                # 4) Save average-head JSONL
                 # JSONL record with summaries + reference to the .pt file
-                item_attn_result = {
-                    "item": idx + 1,
-                    "video_id": video_id,
-                    "target": target,
-                    #"attn_file": attn_pt_path,
-                    "results": final_results_attn
-                }
+                # Save average JSONL (only if not per-head-only)
+                if not ATTN_PER_HEAD_ONLY:
+                    item_attn_result = {
+                        "item": idx + 1,
+                        "video_id": video_id,
+                        "target": target,
+                        #"attn_file": attn_pt_path,
+                        "results": final_results_attn
+                    }
 
-                with open(output_path_attn, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(item_attn_result, ensure_ascii=False) + "\n")
+                    with open(output_path_attn, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(item_attn_result, ensure_ascii=False) + "\n")
 
-                print(f"✅ item {idx+1} saved (attention_weights)")
+                    print(f"✅ item {idx+1} saved (attention_weights)")
+
+                # 5) Save per-head JSONL (only if enabled)
+                if ATTN_PER_HEAD or ATTN_PER_HEAD_ONLY:
+                    item_attn_per_head = {
+                        "item": idx + 1,
+                        "video_id": video_id,
+                        "target": target,
+                        "results": final_results_attn_per_head
+                    }
+                    with open(output_path_attn_per_head, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(item_attn_per_head, ensure_ascii=False) + "\n")
+                
+                    print(f"✅ item {idx+1} saved (attention_weights per head)")
 
 
         except FileNotFoundError as e:
@@ -395,8 +479,13 @@ if __name__ == "__main__":
 
     if RUN_MODE == "prob":
         print(f"✅ Layer-wise probability results saved to: {output_path_prob}")
-    elif RUN_MODE == "attention_weights":
+    elif RUN_MODE == "attention_weights" and not ATTN_PER_HEAD_ONLY:
         print(f"✅ Layer-wise attention results saved to: {output_path_attn}")
+    elif RUN_MODE == "attention_weights" and ATTN_PER_HEAD_ONLY:
+        print(f"✅ Layer-wise attention results (per head) saved to: {output_path_attn_per_head}")
+    elif RUN_MODE == "attention_weights" and ATTN_PER_HEAD:
+        print(f"✅ Layer-wise attention results saved to: {output_path_attn}")
+        print(f"✅ Layer-wise attention results (per head) saved to: {output_path_attn_per_head}")
 
     if failed_videos:
         print("⚠ The following items failed:")
