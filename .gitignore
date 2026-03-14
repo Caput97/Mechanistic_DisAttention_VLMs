@@ -211,4 +211,3 @@ __marimo__/
 *.log
 nohup.out
 *.DS_Store
-results_knockout/
