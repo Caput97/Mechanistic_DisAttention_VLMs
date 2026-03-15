@@ -3,13 +3,154 @@ import torch
 import numpy as np
 from PIL import Image
 from qwen_vl_utils import process_vision_info
+# utils.py
+from typing import Callable, Dict, Any
 
+
+_CURRENT_BACKEND = None
+
+class ModelBackend:
+    def build_message_VT(self, prompt_text: str, video_path: str, target_sent: str):
+        raise NotImplementedError
+
+    def inference(self, message, processor, model):
+        raise NotImplementedError
+
+
+def set_model_backend(backend: ModelBackend):
+    global _CURRENT_BACKEND
+    _CURRENT_BACKEND = backend
+
+
+def get_model_backend() -> ModelBackend:
+    if _CURRENT_BACKEND is None:
+        raise RuntimeError(
+            "Model backend not set. Call set_model_backend(...) in run.py after loading the model."
+        )
+    return _CURRENT_BACKEND
+
+
+# ---- public names imported by tracking_* ----
+def build_message_VT(prompt_text: str, video_path: str, target_sent: str):
+    return get_model_backend().build_message_VT(prompt_text, video_path, target_sent)
+
+
+def inference(message, processor, model):
+    return get_model_backend().inference(message, processor, model)
 
 #quando torno a modalità video, devo cambiare tutti i image_pad in video_pad dove sono tra virgolette. il resto dei nomi variabili l'ho mantenuto a video_pad 
 # -----------------------------------------------------------------------------
 # Message builders (video + text chat format)
 # -----------------------------------------------------------------------------
 
+# utils.py (o meglio: backends/qwen_backend.py)
+from qwen_vl_utils import process_vision_info
+
+
+class QwenBackend(ModelBackend):
+    #attualmente è per le immagini (riportarla al video con l'esempio che è giù che era quello ufficiale per video)
+    def build_message_VT(self, prompt_text: str, video_path: str, target_sent: str):
+        return [
+            {
+                "role": "system",
+                "content": [
+                    {"type": "text", "text": "You are a helpful assistant."},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "image": video_path,
+                        "max_pixels": 360 * 420,
+                    },
+                    {"type": "text", "text": prompt_text},
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": target_sent},
+                ],
+            },
+        ]
+
+    def inference(self, message, processor, model):
+        text = processor.apply_chat_template(
+            message,
+            tokenize=False,
+            add_generation_prompt=False,
+        )
+        #print("Formatted text:", text)
+
+        #rimetterli in modalità video
+        #image_inputs, video_inputs, video_kwargs = process_vision_info(
+        #    message,
+        #    return_video_kwargs=True,
+        #)
+
+        image_inputs, video_inputs = process_vision_info(
+            message,
+        )
+
+
+        inputs = processor(
+            text=[text],
+            images=image_inputs,
+            videos=video_inputs,
+            padding=True,
+            return_tensors="pt",
+            #**video_kwargs,
+        )
+
+        #rimettere questo quando torno a modalità video
+        #return text, inputs, video_inputs, video_kwargs
+
+        return text, inputs, video_inputs, None
+
+
+class LlavaOnevisionBackend(ModelBackend):
+    def build_message_VT(self, prompt_text: str, video_path: str, target_sent: str):
+        return [
+            {
+                "role": "system",
+                "content": [
+                    {"type": "text", "text": "You are a helpful assistant."},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    # se vuoi usare video nativo:
+                    {"type": "image", "path": video_path},
+                    {"type": "text", "text": prompt_text},
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": target_sent},
+                ],
+            },
+        ]
+
+    def inference(self, message, processor, model):
+        # Per LLaVA-OneVision HF puoi usare il processor multimodale direttamente.
+        # Se vuoi mantenere il target assistant nel prompt per scoring, add_generation_prompt=False.
+        inputs = processor.apply_chat_template(
+            message,
+            add_generation_prompt=False,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+            num_frames=8,   # o quello che vuoi controllare da config
+        )
+
+        return None, inputs, None, None
+
+''' 
+versione senza backend e con immagini invece di video
 #version of prompt with image + text
 
 def build_message_VT(prompt_text: str, video_path: str, target_sent: str):
@@ -49,6 +190,7 @@ def build_message_VT(prompt_text: str, video_path: str, target_sent: str):
         },
     ]
     return message
+'''
 
 '''
 #final version for VT generation (prompt + video as input, generation of A/B as output)
@@ -176,6 +318,9 @@ def inference(message, processor, model):
     return text, inputs, video_inputs, video_kwargs
 '''
 
+'''
+versione che stavo usando per un solo modello e per le immagini (senza i video_kwargs)
+
 #inference with images
 def inference(message, processor, model):
     """
@@ -213,6 +358,7 @@ def inference(message, processor, model):
 
     return text, inputs, video_inputs, None
 
+'''
 
 
 def get_video_id(video_id_str: str) -> str:
@@ -229,7 +375,57 @@ def get_video_id(video_id_str: str) -> str:
 
 
 
+# ---------------------------------------------------
+# Model structure helpers
+# ---------------------------------------------------
 
+def get_text_layers(model):
+    """
+    Return the decoder layers of the language model,
+    independently of the multimodal architecture.
+
+    Supports:
+    - Qwen2.5-VL
+    - LLaVA-OneVision
+    """
+
+    # Qwen2.5-VL
+    if hasattr(model, "model") and hasattr(model.model, "layers"):
+        return model.model.layers
+
+    # LLaVA-OneVision
+    if hasattr(model, "language_model"):
+        return model.language_model.model.layers
+
+    raise ValueError(f"Unsupported model structure: {type(model)}")
+
+def get_text_model(model):
+    """
+    Return the text backbone module.
+    """
+
+    # Qwen2.5-VL
+    if hasattr(model, "model"):
+        return model.model
+
+    # LLaVA-OneVision
+    if hasattr(model, "language_model") and hasattr(model.language_model, "model"):
+        return model.language_model.model
+
+    raise ValueError(f"Unsupported model structure: {type(model)}")
+
+
+def get_text_norm(model):
+    """
+    Return the final norm layer of the text backbone.
+    """
+
+    text_model = get_text_model(model)
+
+    if hasattr(text_model, "norm"):
+        return text_model.norm
+
+    raise ValueError(f"Could not find final norm for model: {type(model)}")
 
 
 # -----------------------------------------------------------------------------

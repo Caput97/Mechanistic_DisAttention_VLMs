@@ -1,21 +1,16 @@
 import torch
 from types import MethodType
 from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLAttention
+from attn_knockout.utils import get_text_layers
 
 
-#PER ORA LASCIO COSì, QUANDO AGGIUNGERO' ALTRI MODELLI:
-#def patch_model(model, model_name):
-#    if "qwen" in model_name:
-#        patch_qwen(model)
-#    elif "llava" in model_name:
-#        patch_llava(model)
 
 # -----------------------------------------------------------------------------
 # Attention patching (knockout of specific attention flows)
 # -----------------------------------------------------------------------------
 
 # Keep a reference to the original forward method
-_orig_forward = Qwen2_5_VLAttention.forward
+#_orig_forward = Qwen2_5_VLAttention.forward
 
 
 def patched_forward(
@@ -31,7 +26,7 @@ def patched_forward(
     **kwargs,
 ):
     """
-Custom forward for Qwen2_5_VLAttention.
+Generic patched forward for text self-attention modules.
 
 This patch:
   1. Ensures that a full (batch, 1, seq, seq) attention_mask exists.
@@ -99,8 +94,7 @@ Requirements:
                 attention_mask[:, :, row_idx, row_idx] = 0.0
 
     # Call the original attention forward and return all outputs
-    attn_output, attn_weights, past = _orig_forward(
-        self,
+    outputs = self._original_forward(
         hidden_states,
         attention_mask=attention_mask,
         position_ids=position_ids,
@@ -112,7 +106,7 @@ Requirements:
         **kwargs
     )
 
-    return attn_output, attn_weights, past
+    return outputs
 
 
 
@@ -121,12 +115,17 @@ Requirements:
 def set_mask_ranges(model, mask_ranges):
     """
     Set the same list of (row_idx, start_idx, end_idx) on all
-    Qwen2_5_VLAttention modules in the model.
+    the text self-attention modules in the model.
     These attributes are then used inside patched_forward() to modify the attention mask.
     """
-    for m in model.modules():
-        if isinstance(m, Qwen2_5_VLAttention):
-            m.mask_ranges = mask_ranges
+    #for m in model.modules():
+    #    if isinstance(m, Qwen2_5_VLAttention):
+    #        m.mask_ranges = mask_ranges
+    layers = get_text_layers(model)
+
+    for layer in layers:
+        attn = layer.self_attn
+        attn.mask_ranges = mask_ranges
 
 
 #for the no-blocking case
@@ -143,9 +142,13 @@ def patch_all_attention_layers(model):
     and initialize the "mask_ranges" attribute to an empty list, while storing
     the original forward in 'attn._original_forward.
     """
-    for i, layer in enumerate(model.model.layers):
+    layers = get_text_layers(model)
+
+    for i, layer in enumerate(layers):
         attn = layer.self_attn
-        attn._original_forward = attn.forward
+        #attn._original_forward = attn.forward
+        if not hasattr(attn, "_original_forward"):
+            attn._original_forward = attn.forward
         attn.forward = MethodType(patched_forward, attn)
         attn.layer_index = i
         attn.mask_ranges = []  # by default: no extra blocking

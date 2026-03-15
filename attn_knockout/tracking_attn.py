@@ -10,6 +10,7 @@ from attn_knockout.utils import (
     build_key_spans_for_mode,
     get_query_rows,
     build_mask_ranges,
+    get_text_layers
 )
 
 from attn_knockout.patching import (
@@ -126,7 +127,8 @@ def track_attention_layerwise(
         # Sanity: align sizes
         # assistant_content: len(qrows) == target_len
         # assistant_token:   len(qrows) == 1 (we will only compute 1 token stats)
-        num_layers = len(model.model.layers)
+        text_layers = get_text_layers(model)
+        num_layers = len(text_layers)
         label_results = {}
 
         # Column regions

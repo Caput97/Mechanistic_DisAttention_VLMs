@@ -129,6 +129,8 @@ from transformers import AutoProcessor
 from transformers import Qwen2_5_VLForConditionalGeneration
 from transformers import AutoProcessor, LlavaOnevisionForConditionalGeneration
 
+from attn_knockout.utils import QwenBackend, LlavaOnevisionBackend
+
 
 def load_model(
     model_name: str,
@@ -148,16 +150,16 @@ def load_model(
 
     model_name = model_name.lower()
 
-    if "qwen" in model_name:
-        return _load_qwen(
+
+    if "llava-onevision" in model_name:
+        return _load_llava_onevision(
             model_name,
             torch_dtype=torch_dtype,
             device_map=device_map,
             attn_implementation=attn_implementation,
         )
-
-    elif "llava-onevision" in model_name:
-        return _load_llava_onevision(
+    elif "qwen" in model_name:
+        return _load_qwen(
             model_name,
             torch_dtype=torch_dtype,
             device_map=device_map,
@@ -194,9 +196,11 @@ def _load_qwen(
     processor = AutoProcessor.from_pretrained(model_id, use_fast=True)
     tokenizer = processor.tokenizer
     lm_head = model.lm_head
+    backend = QwenBackend()
+    
 
     print("✅ Qwen loaded.")
-    return model, processor, tokenizer, lm_head 
+    return model, processor, tokenizer, lm_head, backend
 
 def _load_llava_onevision(
     model_id: str,
@@ -216,8 +220,9 @@ def _load_llava_onevision(
     processor = AutoProcessor.from_pretrained(model_id, use_fast=True)
     tokenizer = processor.tokenizer
     lm_head = model.language_model.lm_head
+    backend = LlavaOnevisionBackend()
 
     print("✅ LLaVA-OneVision loaded.")
-    return model, processor, tokenizer, lm_head   
+    return model, processor, tokenizer, lm_head, backend
 
 

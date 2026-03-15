@@ -10,13 +10,15 @@ from attn_knockout.utils import (
     build_key_spans_for_mode,
     get_query_rows,
     build_mask_ranges,
+    get_text_layers,
+    get_text_model,
+    get_text_norm
 )
 
 from attn_knockout.patching import (
     set_mask_ranges,
     clear_mask_ranges,
 )
-
 
 
 
@@ -184,7 +186,8 @@ def track_sentence_prob_layerwise(
 
 
         # One dict per transformer layer
-        num_layers = len(model.model.layers)
+        text_layers = get_text_layers(model)
+        num_layers = len(text_layers)
         layer_probs = {f"layer_{i}": [] for i in range(num_layers)}
 
         with torch.no_grad():
@@ -200,7 +203,7 @@ def track_sentence_prob_layerwise(
             )
 
             hidden_states = output.hidden_states  # hidden_states[0]=embedding, [1]=layer0, ...
-            norm = model.model.norm
+            norm = get_text_norm(model)
 
             # We'll store scores under the key "mask_mode" to remember which setting was used
             key_name = mask_mode

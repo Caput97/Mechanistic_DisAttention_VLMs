@@ -34,6 +34,8 @@ from attn_knockout.tracking_prob import track_sentence_prob_layerwise
 from attn_knockout.tracking_attn import track_attention_layerwise
 from attn_knockout.utils import get_video_id
 from attn_knockout.models import load_model
+from attn_knockout.utils import set_model_backend
+from attn_knockout.utils import get_text_layers
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -206,16 +208,16 @@ if __name__ == "__main__":
 
 
     # Output file for sentence probabilities
-    output_path_prob = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/Attn_knockout_100_16F_{query_scope}_{subdataset}_eng_{video_mode}_mask_{mask_modes_tag}.jsonl")
+    output_path_prob = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/Attn_knockout_100_16F_{query_scope}_{subdataset}_eng_{video_mode}_mask_{mask_modes_tag}_provaLlava.jsonl")
     #output_path_prob = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/Attn_knockout_40_16F_ass_cont_priors_ita.jsonl")
 
     # Output file for attention weights (token-wise + top-k)
-    output_path_attn = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/Attn_weights_100_16F_{query_scope}_{subdataset}_eng_{video_mode}_mask_{mask_modes_tag}_{attn_mode_str}.jsonl")
+    output_path_attn = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/Attn_weights_100_16F_{query_scope}_{subdataset}_eng_{video_mode}_mask_{mask_modes_tag}_{attn_mode_str}_provaLlava.jsonl")
     #output_path_attn = (f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/Attn_weights_40_16F_ass_cont_priors_ita.jsonl")
 
     output_path_attn_per_head = (
     f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/"
-    f"attn_weights_per_head_100_16F_{query_scope}_{subdataset}_eng_{video_mode}_mask_{mask_modes_tag}_{attn_mode_str}.jsonl"
+    f"attn_weights_per_head_100_16F_{query_scope}_{subdataset}_eng_{video_mode}_mask_{mask_modes_tag}_{attn_mode_str}_provaLlava.jsonl"
 )  
     #output_path_attn_per_head = (
     #f"/home/dtesta/Mechanistic_DisAttention_VLMs/results_knockout/qwen2.5vl/"
@@ -232,7 +234,8 @@ if __name__ == "__main__":
     #os.makedirs(attn_pt_dir, exist_ok=True)
 
 
-    model_id = "Qwen/Qwen2.5-VL-7B-Instruct"
+    #model_id = "Qwen/Qwen2.5-VL-7B-Instruct"
+    model_id = "llava-hf/llava-onevision-qwen2-7b-ov-hf"
 
     # -----------------------------
     # Load data
@@ -253,11 +256,31 @@ if __name__ == "__main__":
     # -----------------------------
     # Load model and patch attention
     # -----------------------------
-    model, processor, tokenizer, lm_head = load_model(model_id)
+
+
+    #vecchio modo
+    #model, processor, tokenizer, lm_head = load_model(model_id)
+
+    model, processor, tokenizer, lm_head, backend = load_model(
+        model_id,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        attn_implementation="eager",
+    )
+
+    # register the backend so utils knows which functions to use
+    set_model_backend(backend)
+    print(f"🔧 Using backend: {type(backend).__name__}")
+
+
     model.eval()
 
-    print(type(model.model.layers[0].self_attn))
-    print(model.model.layers[0].self_attn.forward)
+    #print(type(model.model.layers[0].self_attn))
+    #print(model.model.layers[0].self_attn.forward)
+    layers = get_text_layers(model)
+
+    print(type(layers[0].self_attn))
+    print(layers[0].self_attn.forward)
     print()
     print() 
 
@@ -273,7 +296,7 @@ if __name__ == "__main__":
 
     # Example: process only a slice of the dataset (here item 6)
     #for idx, item in enumerate(tqdm(data[6:7], desc="Processing items"), start=6):
-    for idx, item in enumerate(tqdm(data[:100], desc="Processing items")):
+    for idx, item in enumerate(tqdm(data[:1], desc="Processing items")):
 
         try:
             prompt = item["multiple_choice_prompt"]
